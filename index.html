@@ -13,37 +13,38 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <style>
         :root {
-            --primary: #ff3b30;
-            --bg: #000;
-            --hud-bg: rgba(0, 0, 0, 0.6);
+            --accent: #2c3e50;
+            --highlight: #3498db;
+            --alert: #e74c3c;
+            --glass: rgba(20, 20, 20, 0.6);
         }
 
         body {
             margin: 0;
-            background: var(--bg);
+            background: #000;
             color: white;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: 'Segoe UI', Roboto, Helvetica, sans-serif;
             overflow: hidden;
             height: 100vh;
             display: flex;
             flex-direction: column;
         }
 
-        /* Video Container */
+        /* Video Layer */
         #cam-container {
-            position: relative;
-            flex-grow: 1;
-            overflow: hidden;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: #111;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
         }
 
         video {
             width: 100%;
             height: 100%;
             object-fit: cover;
+            filter: contrast(1.1) brightness(1.1);
         }
 
         canvas {
@@ -52,78 +53,101 @@
             left: 0;
             width: 100%;
             height: 100%;
-            pointer-events: none;
         }
 
-        /* HUD Overlay */
-        #hud {
+        /* Fusion Summary Bar */
+        #fusion-summary {
             position: absolute;
-            top: safe-area-inset-top;
-            left: 0;
-            width: 100%;
-            padding: 10px;
-            box-sizing: border-box;
-            display: flex;
-            justify-content: space-between;
-            pointer-events: none;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
             z-index: 10;
+            background: var(--glass);
+            backdrop-filter: blur(10px);
+            padding: 10px 25px;
+            border-radius: 30px;
+            font-size: 16px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            text-align: center;
+            min-width: 250px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
-        .hud-item {
-            background: var(--hud-bg);
-            padding: 5px 12px;
-            border-radius: 8px;
-            font-weight: 600;
+        /* HUD Panels */
+        .hud-panel {
+            position: absolute;
+            z-index: 5;
+            padding: 15px;
+            text-align: center;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+        }
+
+        .hud-panel label {
+            font-size: 10px;
+            opacity: 0.7;
+            letter-spacing: 1px;
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        .hud-value {
+            font-size: 24px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .unit {
             font-size: 14px;
-            backdrop-filter: blur(5px);
+            font-weight: normal;
+            opacity: 0.8;
         }
 
         .status-ok {
-            border-left: 3px solid #34c759;
+            color: #2ecc71;
         }
 
-        .status-warn {
-            border-left: 3px solid #ffcc00;
+        #hud-top-left {
+            top: 20px;
+            left: 20px;
         }
 
-        /* Zone Alert */
-        #zone-alert {
-            position: absolute;
-            bottom: 25%;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #ffcc00;
-            color: black;
-            padding: 10px 20px;
-            border-radius: 8px;
-            font-weight: 800;
-            text-transform: uppercase;
-            display: none;
-            box-shadow: 0 4px 15px rgba(255, 204, 0, 0.4);
-            text-align: center;
+        #hud-top-right {
+            top: 20px;
+            right: 20px;
+        }
+
+        #hud-bottom-left {
+            bottom: 100px;
+            left: 20px;
+        }
+
+        #hud-bottom-right {
+            bottom: 100px;
+            right: 20px;
         }
 
         /* Controls */
         #controls {
-            background: #1c1c1e;
-            padding: 20px;
-            padding-bottom: max(20px, env(safe-area-inset-bottom));
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
             display: flex;
-            justify-content: center;
-            gap: 20px;
+            gap: 30px;
             align-items: center;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 15px 30px;
+            border-radius: 40px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         .btn {
-            border: none;
-            padding: 0;
-            width: 70px;
-            height: 70px;
-            border-radius: 50%;
-            display: flex;
-            alignItems: center;
-            justifyContent: center;
             cursor: pointer;
+            border: none;
             transition: transform 0.1s;
         }
 
@@ -132,67 +156,92 @@
         }
 
         .btn-record {
-            background: white;
-            border: 4px solid #fff;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: transparent;
+            border: 4px solid white;
             position: relative;
         }
 
         .btn-record::after {
             content: '';
             display: block;
-            width: 56px;
-            height: 56px;
-            background: var(--primary);
+            width: 44px;
+            height: 44px;
+            background: #e74c3c;
             border-radius: 50%;
-            margin: 3px;
-            transition: all 0.3s;
+            margin: 4px;
+            transition: 0.2s;
         }
 
         .btn-record.recording::after {
-            width: 30px;
-            height: 30px;
+            width: 24px;
+            height: 24px;
             border-radius: 4px;
-            margin: 16px;
+            margin: 14px;
         }
 
-        .btn-secondary {
-            width: 50px;
-            height: 50px;
-            background: #3a3a3c;
+        .btn-icon {
+            background: none;
             color: white;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 12px;
+            padding: 10px;
+            width: 44px;
+            height: 44px;
+            font-weight: bold;
+            font-size: 12px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 24px;
         }
     </style>
 </head>
 
 <body>
 
-    <!-- HUD Overlay -->
-    <div id="hud">
-        <div class="hud-item status-ok" id="gps-status">GPS: Searching...</div>
-        <div class="hud-item" id="ai-status">AI: Loading...</div>
-        <div class="hud-item" id="speed-display">0 km/h</div>
+    <!-- Tesla Vision HUD -->
+    <div id="fusion-summary">initializing sensors...</div>
+
+    <div id="hud-top-left" class="hud-panel">
+        <label>SPEED</label>
+        <div class="hud-value"><span id="speed-display">0</span> <span class="unit">km/h</span></div>
+    </div>
+
+    <div id="hud-top-right" class="hud-panel">
+        <label>G-FORCE</label>
+        <div class="hud-value" id="g-display">0.0</div>
+    </div>
+
+    <div id="hud-bottom-left" class="hud-panel">
+        <label>GPS SIGNAL</label>
+        <div class="hud-value status-ok" id="gps-status">FIX</div>
+        <div style="font-size: 10px; opacity: 0.6; margin-top: 5px; font-family: monospace;">
+            <span id="coords">WAITING...</span><br>
+            <span id="heading">---°</span>
+        </div>
+    </div>
+
+    <div id="hud-bottom-right" class="hud-panel">
+        <label>AI VISION</label>
+        <div class="hud-value status-ok" id="ai-status">ACTIVE</div>
     </div>
 
     <div id="cam-container">
         <video id="webcam" autoplay playsinline muted loop></video>
         <canvas id="overlay"></canvas>
-
-        <div id="zone-alert">
-            School Zone<br><span style="font-size:0.8em">Max 30 km/h</span>
-        </div>
     </div>
 
     <div id="controls">
-        <!-- Hidden File Input -->
+        <input type="file" id="song-upload" accept="video/*" style="display: none;" onchange="handleUpload(event)">
+        <!-- Fallback ID for consistency -->
         <input type="file" id="video-upload" accept="video/*" style="display: none;">
 
-        <button class="btn btn-secondary" onclick="document.getElementById('video-upload').click()">�</button>
+        <button class="btn btn-icon" onclick="document.getElementById('video-upload').click()">📂</button>
         <button class="btn btn-record" id="record-btn" onclick="toggleRecording()"></button>
-        <button class="btn btn-secondary" onclick="triggerOCR()" style="font-size: 16px;">🔍</button>
+        <button class="btn btn-icon" onclick="triggerOCR()">abc</button>
+        <button class="btn btn-icon" id="sensor-btn" onclick="requestSensors()" style="display:none;">⚡</button>
     </div>
 
     <!-- AI Dependencies -->
@@ -201,7 +250,6 @@
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2/dist/tesseract.min.js"></script>
 
-    <!-- Logic (Relative Path) -->
     <script src="static/js/app.js"></script>
 </body>
 
