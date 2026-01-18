@@ -1,288 +1,318 @@
-// MapleCam PWA Logic - Real AI & Sensors Edition
+// MapleCam PWA Logic - Phase 4: Tesla Vision & Sensor Fusion
 
 // --- Constants ---
-let SCHOOL_ZONES = [{ name: "Test Zone", lat: 0, lon: 0, radius: 0.002 }];
+const SCHOOL_ZONES = [{ name: "Demo Elem", lat: 0, lon: 0, radius: 0.002 }];
 const SAFE_CLASSES = ['car', 'truck', 'bus', 'motorcycle', 'bicycle', 'person', 'traffic light', 'stop sign'];
-const IMPACT_THRESHOLD = 2.5; // G-Force
+const IMPACT_THRESHOLD = 2.0;
 
 // --- State ---
+let state = {
+    speed: 0,
+    gForce: 1.0,
+    gpsFix: false,
+    zone: null,
+    recording: false,
+    impactDetected: false,
+    detections: []
+};
+
 let stream = null;
 let mediaRecorder = null;
 let recordedChunks = [];
-let isRecording = false;
-let currentLocation = { lat: 0, lon: 0, speed: 0 };
-let currentG = { x: 0, y: 0, z: 0, total: 1.0 };
+let models = { obj: null, face: null };
 
-// AI Models
-let objectModel = null;
-let faceModel = null;
-let aiLoaded = false;
-
-// --- DOM Elements ---
-const video = document.getElementById('webcam');
-const canvas = document.getElementById('overlay');
-const ctx = canvas.getContext('2d');
-const zoneAlert = document.getElementById('zone-alert');
-const gpsStatus = document.getElementById('gps-status');
-const aiStatus = document.getElementById('ai-status');
-const speedDisplay = document.getElementById('speed-display');
-const gDisplay = document.getElementById('g-display');
-const recBtn = document.getElementById('record-btn');
-const uploadInput = document.getElementById('video-upload');
-const sensorBtn = document.getElementById('sensor-btn');
+// --- DOM References ---
+const ui = {
+    video: document.getElementById('webcam'),
+    canvas: document.getElementById('overlay'),
+    ctx: null,
+    summary: document.getElementById('fusion-summary'),
+    speed: document.getElementById('speed-display'),
+    gForce: document.getElementById('g-display'),
+    gps: document.getElementById('gps-status'),
+    ai: document.getElementById('ai-status'),
+    recBtn: document.getElementById('record-btn'),
+    upload: document.getElementById('video-upload'),
+    sensorBtn: document.getElementById('sensor-btn')
+};
+ui.ctx = ui.canvas.getContext('2d');
 
 // --- Initialization ---
 async function init() {
+    console.log("MapleCam Phase 4 Starting...");
     try {
-        // 1. Load Models
-        loadModels();
+        await loadAI();
+        await startCamera();
+        startSensors();
 
-        // 2. Start Camera
-        startCamera();
+        // Listeners
+        ui.upload.addEventListener('change', handleUpload);
+        ui.video.addEventListener('loadeddata', () => requestAnimationFrame(loop));
 
-        // 3. Start GPS
-        if ("geolocation" in navigator) {
-            navigator.geolocation.watchPosition(updateLocation, gpsError, { enableHighAccuracy: true });
-        }
+        // Sensor Fusion Loop (runs less frequent than render)
+        setInterval(sensorFusion, 200);
 
-        // 4. Check for Sensor Permissions (iOS 13+)
-        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-            sensorBtn.style.display = 'flex'; // Show button to ask permission
-        } else {
-            // Android/Older iOS usually allow by default
-            window.addEventListener('devicemotion', handleMotion);
-        }
-
-        // 5. Listeners
-        uploadInput.addEventListener('change', handleFileUpload);
-        video.addEventListener('loadeddata', () => {
-            requestAnimationFrame(gameLoop);
-        });
-
-    } catch (err) {
-        console.error("Init Error:", err);
-    }
+    } catch (e) { console.error("Init Failed", e); }
 }
 
-async function loadModels() {
-    aiStatus.innerText = "AI: Loading...";
+async function loadAI() {
+    ui.ai.innerText = "LOAD";
     try {
-        objectModel = await cocoSsd.load();
-        faceModel = await blazeface.load();
-        aiLoaded = true;
-        aiStatus.innerText = "AI: Active";
-        aiStatus.className = "hud-item status-ok";
-    } catch (e) {
-        console.error(e);
-        aiStatus.innerText = "AI: Error";
-        aiStatus.className = "hud-item status-warn";
-    }
+        models.obj = await cocoSsd.load();
+        models.face = await blazeface.load();
+        ui.ai.innerText = "ACTIVE";
+    } catch (e) { ui.ai.innerText = "ERR"; }
 }
 
 async function startCamera() {
+    const constraints = { video: { facingMode: "environment", width: { ideal: 1280 } } };
     try {
-        const constraints = {
-            video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
-            audio: false
-        };
         stream = await navigator.mediaDevices.getUserMedia(constraints);
-        video.srcObject = stream;
-        video.removeAttribute('src');
-    } catch (e) {
-        console.warn("Camera failed");
+        ui.video.srcObject = stream;
+        ui.video.removeAttribute('src');
+    } catch (e) { console.warn("Cam Init Err", e); }
+}
+
+// --- Sensor Core ---
+
+function startSensors() {
+    if ("geolocation" in navigator) {
+        navigator.geolocation.watchPosition(
+            p => {
+                state.speed = (p.coords.speed || 0) * 3.6;
+                state.gpsFix = true;
+                checkZone(p.coords.latitude, p.coords.longitude);
+                ui.gps.innerText = "FIX";
+            },
+            () => { state.gpsFix = false; ui.gps.innerText = "LOST"; },
+            { enableHighAccuracy: true }
+        );
+    }
+
+    if (window.DeviceMotionEvent) {
+        // Show permission button for iOS
+        if (typeof DeviceMotionEvent.requestPermission === 'function') ui.sensorBtn.style.display = 'inline-block';
+        else window.addEventListener('devicemotion', handleMotion);
     }
 }
+
+function handleMotion(e) {
+    const acc = e.accelerationIncludingGravity;
+    if (acc) {
+        const total = Math.sqrt(acc.x ** 2 + acc.y ** 2 + acc.z ** 2) / 9.8;
+        state.gForce = total;
+
+        if (total > IMPACT_THRESHOLD && !state.impactDetected) {
+            state.impactDetected = true;
+            triggerImpactProtocol();
+            setTimeout(() => state.impactDetected = false, 5000); // Cool down
+        }
+    }
+}
+
+function checkZone(lat, lon) {
+    // Mock Init
+    if (SCHOOL_ZONES[0].lat === 0) { SCHOOL_ZONES[0].lat = lat + 0.0005; SCHOOL_ZONES[0].lon = lon; }
+
+    let active = null;
+    SCHOOL_ZONES.forEach(z => {
+        const d = Math.sqrt((z.lat - lat) ** 2 + (z.lon - lon) ** 2);
+        if (d < z.radius) active = z.name;
+    });
+    state.zone = active;
+}
+
+// --- Sensor Fusion Engine ---
+
+function sensorFusion() {
+    // Aggregates data into a meaningful summary
+    const s = state;
+    let msg = "CRUISING - ALL SYSTEMS NOMINAL";
+    let color = "#3498db"; // Blue default
+
+    ui.speed.innerText = Math.round(s.speed);
+    ui.gForce.innerText = s.gForce.toFixed(2);
+
+    // Hierarchy of Importance:
+    // 1. Impact / Hard Braking
+    if (s.gForce > 1.8) {
+        msg = "⚠️ HARD BRAKING DETECTED";
+        color = "#e74c3c"; // Red
+    }
+    // 2. School Zone Violation
+    else if (s.zone && s.speed > 30) {
+        msg = `⚠️ SPEEDING IN ${s.zone} (${Math.round(s.speed)} km/h)`;
+        color = "#e74c3c";
+    }
+    // 3. School Zone Caution
+    else if (s.zone) {
+        msg = `CAUTION: ${s.zone} - MAINTAIN 30`;
+        color = "#f1c40f"; // Yellow
+    }
+    // 4. Object Detection Context
+    else if (s.detections.length > 0) {
+        // Find most prominent object
+        const nearest = s.detections.sort((a, b) => b.bbox[2] * b.bbox[3] - a.bbox[2] * a.bbox[3])[0];
+        if (nearest) {
+            msg = `TRACKING: ${nearest.class.toUpperCase()} AHEAD`;
+        }
+    }
+
+    ui.summary.innerText = msg;
+    ui.summary.style.border = `1px solid ${color}`;
+    ui.summary.style.color = color == "#3498db" ? "white" : color;
+}
+
+// --- Tesla Vision Rendering ---
+
+async function loop() {
+    if (ui.video.paused) return requestAnimationFrame(loop);
+
+    // Match Dimensions
+    if (ui.canvas.width !== ui.video.videoWidth) {
+        ui.canvas.width = ui.video.videoWidth;
+        ui.canvas.height = ui.video.videoHeight;
+    }
+
+    ui.ctx.clearRect(0, 0, ui.canvas.width, ui.canvas.height);
+
+    // AI Inference
+    if (models.obj) {
+        const preds = await models.obj.detect(ui.video);
+        state.detections = preds.filter(p => SAFE_CLASSES.includes(p.class));
+        drawVectorHUD(state.detections);
+    }
+
+    if (models.face) {
+        const faces = await models.face.estimateFaces(ui.video, false);
+        drawPrivacyMasks(faces);
+    }
+
+    requestAnimationFrame(loop);
+}
+
+function drawVectorHUD(objects) {
+    const ctx = ui.ctx;
+
+    // Draw Projected Path Lines (Simulation)
+    const w = ui.canvas.width;
+    const h = ui.canvas.height;
+
+    ctx.beginPath();
+    ctx.strokeStyle = "rgba(52, 152, 219, 0.3)";
+    ctx.lineWidth = 2;
+    // Left Line
+    ctx.moveTo(w * 0.2, h);
+    ctx.lineTo(w * 0.45, h * 0.55);
+    // Right Line
+    ctx.moveTo(w * 0.8, h);
+    ctx.lineTo(w * 0.55, h * 0.55);
+    ctx.stroke();
+
+    objects.forEach(obj => {
+        const [x, y, width, height] = obj.bbox;
+        const score = Math.round(obj.score * 100);
+
+        // Tesla Style: Semi-transparent fill + Corner Brackets
+        ctx.fillStyle = "rgba(52, 152, 219, 0.1)";
+        ctx.fillRect(x, y, width, height);
+
+        ctx.strokeStyle = "#3498db";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, width, height);
+
+        // Floating Label
+        ctx.fillStyle = "#3498db";
+        ctx.fillRect(x, y - 18, width, 18);
+        ctx.fillStyle = "black";
+        ctx.font = "bold 10px sans-serif";
+        ctx.fillText(`${obj.class.toUpperCase()} ${score}%`, x + 4, y - 5);
+
+        // Distance Line (Simulated)
+        ctx.beginPath();
+        ctx.moveTo(w / 2, h); // From center bottom
+        ctx.lineTo(x + width / 2, y + height); // To object bottom
+        ctx.strokeStyle = "rgba(52, 152, 219, 0.2)";
+        ctx.stroke();
+    });
+}
+
+function drawPrivacyMasks(faces) {
+    faces.forEach(face => {
+        const [x, y] = face.topLeft;
+        const [x2, y2] = face.bottomRight;
+        const w = x2 - x;
+        const h = y2 - y;
+
+        ui.ctx.fillStyle = "rgba(0,0,0,0.95)";
+        ui.ctx.fillRect(x, y, w, h);
+
+        ui.ctx.fillStyle = "white";
+        ui.ctx.font = "8px sans-serif";
+        ui.ctx.fillText("PRIVACY", x, y - 2);
+    });
+}
+
+// --- Utils ---
 
 function requestSensors() {
-    // Required for iOS 13+ to access Accelerometer
-    DeviceMotionEvent.requestPermission()
-        .then(response => {
-            if (response === 'granted') {
-                window.addEventListener('devicemotion', handleMotion);
-                sensorBtn.style.display = 'none';
-            } else {
-                alert("Sensor permission denied");
-            }
-        })
-        .catch(console.error);
+    DeviceMotionEvent.requestPermission().then(r => {
+        if (r == 'granted') { window.addEventListener('devicemotion', handleMotion); ui.sensorBtn.style.display = 'none'; }
+    });
 }
 
-function handleMotion(event) {
-    // Gravity is usually included in accelerationIncludingGravity
-    const acc = event.accelerationIncludingGravity;
-    if (!acc) return;
-
-    const x = acc.x || 0;
-    const y = acc.y || 0;
-    const z = acc.z || 0;
-
-    // Calculate Total G (Earth = ~9.8 m/s^2)
-    const totalForce = Math.sqrt(x * x + y * y + z * z) / 9.8;
-
-    currentG.total = totalForce;
-    gDisplay.innerText = "G: " + totalForce.toFixed(2);
-
-    // Impact Detection
-    if (totalForce > IMPACT_THRESHOLD) {
-        gDisplay.style.backgroundColor = "red";
-        if (!isRecording) {
-            console.log("Impact Detected! Auto-Recording...");
-            startRecording();
-            setTimeout(stopUnknownRecording, 10000); // Record 10s post impact
-        }
-    } else {
-        gDisplay.style.backgroundColor = "rgba(0,0,0,0.6)";
-    }
-}
-
-function handleFileUpload(e) {
+function handleUpload(e) {
     const file = e.target.files[0];
     if (file) {
-        const url = URL.createObjectURL(file);
-        video.srcObject = null;
-        video.src = url;
-        video.play();
-        aiStatus.innerText = "File Mode";
+        ui.video.srcObject = null;
+        ui.video.src = URL.createObjectURL(file);
+        ui.video.play();
     }
 }
 
-// --- Loops ---
-
-function updateLocation(pos) {
-    const { latitude, longitude, speed } = pos.coords;
-    currentLocation.speed = (speed || 0) * 3.6;
-
-    // Create Test Zone around start point
-    if (SCHOOL_ZONES[0].lat === 0) {
-        SCHOOL_ZONES[0].lat = latitude + 0.0005;
-        SCHOOL_ZONES[0].lon = longitude;
+function triggerImpactProtocol() {
+    if (!state.recording) {
+        console.log("IMPACT START REC");
+        toggleRecording();
+        ui.summary.innerText = "⚠️ IMPACT RECORDING ACTIVE";
+        ui.summary.style.backgroundColor = "red";
     }
-
-    gpsStatus.innerText = "GPS: Fix";
-    gpsStatus.className = "hud-item status-ok";
-    speedDisplay.innerText = Math.round(currentLocation.speed) + " km/h";
-
-    checkZones(latitude, longitude);
 }
-
-function gpsError() { gpsStatus.innerText = "GPS: Lost"; }
-
-function checkZones(lat, lon) {
-    let inZone = false;
-    for (let zone of SCHOOL_ZONES) {
-        const d = Math.sqrt(Math.pow(zone.lat - lat, 2) + Math.pow(zone.lon - lon, 2));
-        if (d < zone.radius) {
-            inZone = true;
-            zoneAlert.querySelector('span').innerText = `Max 30 km/h - ${zone.name}`;
-        }
-    }
-    zoneAlert.style.display = inZone ? 'block' : 'none';
-}
-
-async function gameLoop() {
-    if (video.paused || video.ended) {
-        requestAnimationFrame(gameLoop);
-        return;
-    }
-    if (video.videoWidth > 0 && canvas.width !== video.videoWidth) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-    }
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    if (aiLoaded) {
-        await detectObjects();
-        await detectFaces();
-    }
-    requestAnimationFrame(gameLoop);
-}
-
-async function detectObjects() {
-    // COCO-SSD
-    const predictions = await objectModel.detect(video);
-
-    predictions.forEach(p => {
-        if (SAFE_CLASSES.includes(p.class)) {
-            ctx.strokeStyle = "#34c759";
-            ctx.lineWidth = 4;
-            ctx.strokeRect(p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[3]);
-
-            ctx.fillStyle = "#34c759";
-            ctx.fillRect(p.bbox[0], p.bbox[1] - 25, p.bbox[2], 25);
-            ctx.fillStyle = "black";
-            ctx.font = "bold 16px sans-serif";
-            ctx.fillText(`${p.class.toUpperCase()} ${Math.round(p.score * 100)}%`, p.bbox[0] + 5, p.bbox[1] - 7);
-        }
-    });
-}
-
-async function detectFaces() {
-    // Blazeface
-    const pass = await faceModel.estimateFaces(video, false);
-    pass.forEach(p => {
-        const start = p.topLeft;
-        const end = p.bottomRight;
-        const size = [end[0] - start[0], end[1] - start[1]];
-
-        ctx.fillStyle = "black";
-        ctx.fillRect(start[0], start[1], size[0], size[1]);
-        ctx.fillStyle = "white";
-        ctx.font = "12px sans-serif";
-        ctx.fillText("PRIVACY", start[0], start[1] - 5);
-    });
-}
-
-// --- Triggers ---
 
 async function triggerOCR() {
-    const tempCanvas = document.createElement('canvas'); // Temp snapshot
-    tempCanvas.width = video.videoWidth;
-    tempCanvas.height = video.videoHeight;
-    tempCanvas.getContext('2d').drawImage(video, 0, 0);
-
-    aiStatus.innerText = "OCR...";
+    ui.summary.innerText = "SCANNING TEXT...";
+    const tmp = document.createElement('canvas');
+    tmp.width = ui.video.videoWidth; tmp.height = ui.video.videoHeight;
+    tmp.getContext('2d').drawImage(ui.video, 0, 0);
     try {
-        const { data: { text } } = await Tesseract.recognize(tempCanvas, 'eng');
-        alert("OCR Result: " + text);
-    } catch (e) { }
-    aiStatus.innerText = "AI: Active";
+        const { data: { text } } = await Tesseract.recognize(tmp, 'eng');
+        alert("OCR: " + text);
+        ui.summary.innerText = "TEXT CAPTURED";
+    } catch (e) { ui.summary.innerText = "OCR FAILED"; }
 }
 
 function toggleRecording() {
-    if (isRecording) stopUnknownRecording();
-    else startRecording();
-}
-
-function startRecording() {
-    recBtn.classList.add("recording");
-    recordedChunks = [];
-    try {
-        mediaRecorder = new MediaRecorder(stream || video.captureStream());
-    } catch (e) {
-        // Fallback for file playback
-        mediaRecorder = new MediaRecorder(video.captureStream());
+    if (state.recording) {
+        mediaRecorder.stop();
+        state.recording = false;
+        ui.recBtn.classList.remove('recording');
+    } else {
+        recordedChunks = [];
+        try { mediaRecorder = new MediaRecorder(stream || ui.video.captureStream()); }
+        catch (e) { mediaRecorder = new MediaRecorder(ui.video.captureStream()); }
+        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); }
+        mediaRecorder.onstop = saveRec;
+        mediaRecorder.start();
+        state.recording = true;
+        ui.recBtn.classList.add('recording');
     }
-    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
-    mediaRecorder.onstop = saveRecording;
-    mediaRecorder.start();
-    isRecording = true;
 }
 
-function stopUnknownRecording() {
-    recBtn.classList.remove("recording");
-    mediaRecorder.stop();
-    isRecording = false;
-}
-
-function saveRecording() {
-    const blob = new Blob(recordedChunks, { type: "video/webm" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    document.body.appendChild(a);
-    a.style = "display: none";
-    a.href = url;
-    a.download = "maplecam_" + Date.now() + ".webm";
-    a.click();
+function saveRec() {
+    const b = new Blob(recordedChunks, { type: 'video/webm' });
+    const u = URL.createObjectURL(b);
+    const a = document.createElement('a');
+    document.body.appendChild(a); a.style = 'display:none'; a.href = u; a.download = 'evidence.webm'; a.click();
 }
 
 window.addEventListener('load', init);
