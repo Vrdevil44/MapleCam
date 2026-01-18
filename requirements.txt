@@ -1,0 +1,10 @@
+flask==3.0.0
+PyGObject==3.46.0 # Python bindings for GStreamer
+numpy
+opencv-python-headless
+hailo_platform==4.17.0 # HailoRT Python API
+pyserial # For GPS
+shapely # For Geofencing
+geopandas # For School Zone implementation
+picovoice
+vosk

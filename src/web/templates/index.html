@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>MapleCam Sentinel</title>
+    <style>
+        body { background-color: #121212; color: #ffffff; font-family: sans-serif; margin: 0; padding: 0; }
+        .container { display: flex; flex-direction: column; height: 100vh; }
+        header { background-color: #1f1f1f; padding: 1rem; display: flex; justify-content: space-between; align-items: center; }
+        header h1 { margin: 0; font-size: 1.2rem; color: #ff3b30; } /* Maple Red */
+        
+        .video-wrapper { position: relative; flex-grow: 1; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+        img#bg { width: 100%; height: 100%; object-fit: contain; }
+        
+        .overlay { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.5); padding: 5px 10px; border-radius: 4px; pointer-events: none; }
+        .hud-value { font-weight: bold; }
+        
+        .zone-alert { position: absolute; bottom: 10%; width: 100%; text-align: center; display: none; }
+        .zone-alert h2 { background-color: #ffcc00; color: black; display: inline-block; padding: 10px 20px; border-radius: 5px; animation: blink 1s infinite; }
+        
+        @keyframes blink { 50% { opacity: 0; } }
+        
+        footer { background-color: #1f1f1f; padding: 1rem; text-align: center; }
+        button { background-color: #ff3b30; color: white; border: none; padding: 15px 30px; font-size: 1rem; border-radius: 50px; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        button:active { transform: translateY(2px); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>MapleCam Sentinel</h1>
+            <div id="clock">00:00</div>
+        </header>
+        
+        <div class="video-wrapper">
+            <!-- Simulated Video Feed -->
+            <img id="bg" src="/video_feed" alt="Live Feed">
+            
+            <div class="overlay">
+                <div>SPD: <span id="speed" class="hud-value">0</span> km/h</div>
+                <div>GPS: <span id="gps" class="hud-value">Wait...</span></div>
+            </div>
+            
+            <div class="zone-alert" id="zoneAlert">
+                <h2>SCHOOL ZONE - MAX 30</h2>
+            </div>
+        </div>
+        
+        <footer>
+            <button onclick="triggerEvidence()">SAVE EVIDENCE</button>
+        </footer>
+    </div>
+
+    <script>
+        function updateStatus() {
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('clock').innerText = data.time;
+                    document.getElementById('speed').innerText = Math.round(data.speed_kmh || 0);
+                    document.getElementById('gps').innerText = data.fix ? "FIX" : "NO FIX";
+                    
+                    const alertBox = document.getElementById('zoneAlert');
+                    if (data.school_zone) {
+                        alertBox.style.display = 'block';
+                        alertBox.querySelector('h2').innerText = "SCHOOL ZONE: " + data.zone_name;
+                    } else {
+                        alertBox.style.display = 'none';
+                    }
+                })
+                .catch(err => console.error(err));
+        }
+
+        function triggerEvidence() {
+            // Call API to save video
+            alert("Incident Triggered (Simulation)");
+        }
+
+        setInterval(updateStatus, 1000);
+    </script>
+</body>
+</html>

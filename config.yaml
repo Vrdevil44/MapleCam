@@ -1,0 +1,32 @@
+# MapleCam Sentinel Configuration
+
+system:
+  min_confidence: 0.65
+  loop_buffer_seconds: 60
+  device_name: "MapleCam_Prototype_1"
+
+camera:
+  width: 1456
+  height: 1088
+  framerate: 30
+  encoding_bitrate: 15000000 # 15 Mbps for high detail
+
+filters:
+  weather_adaptive: true
+  enable_face_blur: true
+  school_zone_strict: true  # Lowers speed threshold if in school zone based on time of day
+
+paths:
+  raw_recordings: "./data/raw_recordings"
+  evidence_locker: "./data/evidence_locker"
+  logs: "./data/logs"
+  models: "./models"
+
+power:
+  ups_model: "Geekworm_X1202"
+  pl_gpio_pin: 6 # Power Loss Detection Pin (Default for X1202 is typically 6 or 13, verify manual)
+  shutdown_delay: 5 # Seconds to wait before shutting down after ignition loss
+
+ai:
+  hailo_hef_path: "./models/yolov8_winter.hef"
+  face_model_path: "./models/yolov8_face.hef"
