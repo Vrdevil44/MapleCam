@@ -8,6 +8,7 @@
     <title>MapleCam Sentinel</title>
     <!-- Manifest for PWA installation (Relative Path) -->
     <link rel="manifest" href="static/manifest.json">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <style>
@@ -169,13 +170,15 @@
 
 <body>
 
+    <!-- HUD Overlay -->
     <div id="hud">
         <div class="hud-item status-ok" id="gps-status">GPS: Searching...</div>
+        <div class="hud-item" id="ai-status">AI: Loading...</div>
         <div class="hud-item" id="speed-display">0 km/h</div>
     </div>
 
     <div id="cam-container">
-        <video id="webcam" autoplay playsinline muted></video>
+        <video id="webcam" autoplay playsinline muted loop></video>
         <canvas id="overlay"></canvas>
 
         <div id="zone-alert">
@@ -184,10 +187,19 @@
     </div>
 
     <div id="controls">
-        <button class="btn btn-secondary" onclick="toggleSim()">🔬</button>
+        <!-- Hidden File Input -->
+        <input type="file" id="video-upload" accept="video/*" style="display: none;">
+
+        <button class="btn btn-secondary" onclick="document.getElementById('video-upload').click()">�</button>
         <button class="btn btn-record" id="record-btn" onclick="toggleRecording()"></button>
-        <button class="btn btn-secondary" onclick="exportData()">📂</button>
+        <button class="btn btn-secondary" onclick="triggerOCR()" style="font-size: 16px;">🔍</button>
     </div>
+
+    <!-- AI Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2/dist/tesseract.min.js"></script>
 
     <!-- Logic (Relative Path) -->
     <script src="static/js/app.js"></script>
